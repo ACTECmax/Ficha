@@ -2794,6 +2794,34 @@ document.querySelectorAll("input, textarea").forEach(el=>{
   }, 150));
 });
 </script>
+<script>
+// Antes de enviar, garanta que o campo render_pdf_b64 existe e tem conteúdo útil
+(function(){
+  const form = document.querySelector("form");
+  if (!form) return;
+
+  form.addEventListener("submit", function(e){
+    // se existir o campo, valide
+    const iB64 = form.querySelector('[name="render_pdf_b64"]');
+    const iName = form.querySelector('[name="render_pdf_name"]');
+    const iMime = form.querySelector('[name="render_pdf_mime"]');
+
+    if (iB64) {
+      let v = (iB64.value||"").trim();
+      // tira prefixo data: se houver, só pra validar tamanho
+      v = v.replace(/^data:.*?;base64,/, "");
+      if (!v || v.length < 1024) {
+        e.preventDefault();
+        alert("Falha ao gerar o PDF (vazio). Gere novamente antes de enviar.");
+        return false;
+      }
+      // defaults de segurança
+      if (iMime && !iMime.value) iMime.value = "application/pdf";
+      if (iName && !iName.value) iName.value = "Ficha - Cliente.pdf";
+    }
+  }, true);
+})();
+</script>
 
 </body>
 </html>
