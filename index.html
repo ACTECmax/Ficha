@@ -2175,8 +2175,8 @@ function inferFieldsIfMissing(obj){
   const PANEL_ID = "docsAttachPanel";
   const ITEMS = [
     {key:"contrato_social", label:"Contrato Social"},
-    {key:"cartao_cnpj", label:"Junta Comercial"},
-    {key:"inscricao_estadual", label:"Doc. Responsável"},
+    {key:"cartao_cnpj", label:"Cartão CNPJ"},
+    {key:"inscricao_estadual", label:"Inscrição Estadual"},
     {key:"comprovante_endereco", label:"Comprovante de Endereço"},
     {key:"outros", label:"Outros"}
   ];
@@ -2330,95 +2330,96 @@ function inferFieldsIfMissing(obj){
 })();
 </script>
 <!-- === ACTECmax V2 glue (colar antes de 
-<!-- === V2 Enhancements: Diagnostics + Safe Submit + Debounce === -->
+<!-- === V2 (iframe submit) to avoid CORS with Apps Script === -->
 <script>
-// === Diagnostics: long tasks & global errors ===
-try {
-  new PerformanceObserver((list)=>{
-    for (const entry of list.getEntries()) {
-      if (entry.duration > 50) {
-        console.warn("[DIAG] Long task:", Math.round(entry.duration), "ms", entry.name||entry.entryType);
-      }
-    }
-  }).observe({entryTypes:["longtask"]});
-} catch(_) {}
-
-window.addEventListener("error", (e)=>{
-  console.error("[DIAG] JS error:", e.message, "em", e.filename+":"+e.lineno+":"+e.colno);
-});
-window.addEventListener("unhandledrejection", (e)=>{
-  console.error("[DIAG] Promise rejeitada:", e.reason);
-});
-</script>
-
-<script>
-// === Safe submit with timeout + duplicate click guard ===
 (function(){
+  // CONFIG: put your Web App URL here OR set window.ACTEC_SCRIPT_URL before this block
+  const URL_SCRIPT = (window.ACTEC_SCRIPT_URL || "https://script.google.com/macros/s/AKfycbztt_1LIn_DlLRvsAT7ML55VgT-tVvIHgM9dOHyleiO2zEU6vrQ6DcH64F2p0qTZmuy3g/exec");
+
+  // Create a hidden iframe target for the form
+  let iframe = document.getElementById("actec_iframe");
+  if (!iframe) {
+    iframe = document.createElement("iframe");
+    iframe.name = "actec_iframe";
+    iframe.id = "actec_iframe";
+    iframe.style.display = "none";
+    document.body.appendChild(iframe);
+  }
+
   const form = document.querySelector("form");
   if (!form) return;
 
+  // button handling
+  const btn = form.querySelector("[type=submit]");
+  const originalText = btn ? btn.textContent : null;
   let sending = false;
-  const URL_SCRIPT = (window.ACTEC_SCRIPT_URL || "https://script.google.com/macros/s/AKfycbztt_1LIn_DlLRvsAT7ML55VgT-tVvIHgM9dOHyleiO2zEU6vrQ6DcH64F2p0qTZmuy3g/exec");
+  let submitTimer = null;
 
-  async function fetchWithTimeout(resource, options = {}) {
-    const { timeout = 45000 } = options;
-    const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), timeout);
-    try {
-      const res = await fetch(resource, { ...options, signal: controller.signal });
-      return res;
-    } finally {
-      clearTimeout(id);
-    }
-  }
+  // Listen for postMessage from Apps Script (htmlV2_ in Code.gs)
+  window.addEventListener("message", (ev)=>{
+    try{
+      const data = ev.data;
+      if (data === "ACTECV2_OK") {
+        clearTimeout(submitTimer);
+        sending = false;
+        if (btn && originalText) btn.textContent = originalText;
+        alert("Enviado com sucesso!");
+        form.reset();
+      } else if (data === "ACTECV2_ERR") {
+        clearTimeout(submitTimer);
+        sending = false;
+        if (btn) btn.textContent = "Tentar novamente";
+        alert("Não foi possível concluir o envio agora. Verifique sua conexão e tente novamente.");
+      }
+    }catch(_){}
+  }, false);
 
-  form.addEventListener("submit", async (e)=>{
-    // If the form already has an action pointing to Apps Script, keep it.
-    // Our handler just ensures timeout + guard + nice UX.
+  form.addEventListener("submit", function(e){
+    // Use native form submission to hidden iframe (bypasses CORS)
     e.preventDefault();
     if (sending) return;
     sending = true;
 
-    const btn = form.querySelector("[type=submit]");
-    const originalText = btn ? btn.textContent : null;
     if (btn) btn.textContent = "Enviando…";
 
-    try {
-      // Ensure any client-side PDF (render_pdf_*) fields are already set by the page logic (if present)
-      const fd = new FormData(form);
+    // Ensure basic attrs
+    form.method = "POST";
+    form.enctype = "multipart/form-data";
+    form.target = "actec_iframe";
+    form.action = URL_SCRIPT;
 
-      // IMPORTANT: do NOT set Content-Type manually
-      const res = await fetchWithTimeout(URL_SCRIPT, { method: "POST", body: fd, timeout: 45000 });
-
-      if (!res.ok) throw new Error("Falha no envio: " + res.status);
-      alert("Enviado com sucesso!");
-      form.reset();
-    } catch (err) {
-      console.error("[ENVIO] Erro:", err);
-      alert("Não foi possível concluir o envio agora. Tente novamente.");
-    } finally {
-      if (btn && originalText) btn.textContent = originalText;
+    // Safety timeout (45s): if GAS doesn't answer, enable retry UX
+    clearTimeout(submitTimer);
+    submitTimer = setTimeout(()=>{
       sending = false;
-    }
-  }, { passive: false });
-})();
-</script>
+      if (btn) btn.textContent = "Tentar novamente";
+      alert("Não foi possível concluir o envio agora. Verifique sua conexão e tente novamente.");
+    }, 45000);
 
-<script>
-// === Debounce for noisy inputs (masks/validations) ===
-(function(){
-  const debounce = (fn, ms=200)=>{
-    let t; 
-    return (...args)=>{ clearTimeout(t); t = setTimeout(()=>fn(...args), ms); };
-  };
-  document.querySelectorAll("input, textarea").forEach(el=>{
-    el.addEventListener("input", debounce(()=> {
-      // place lightweight validations here if needed
-    }, 150));
+    // Submit!
+    form.submit();
+  }, { passive:false });
+
+  // === Diagnostics: show JS errors and long tasks ===
+  try {
+    new PerformanceObserver((list)=>{
+      for (const entry of list.getEntries()) {
+        if (entry.duration > 50) {
+          console.warn("[DIAG] Long task:", Math.round(entry.duration), "ms", entry.name||entry.entryType);
+        }
+      }
+    }).observe({entryTypes:["longtask"]});
+  } catch(_) {}
+
+  window.addEventListener("error", (e)=>{
+    console.error("[DIAG] JS error:", e.message, "em", e.filename+":"+e.lineno+":"+e.colno);
+  });
+  window.addEventListener("unhandledrejection", (e)=>{
+    console.error("[DIAG] Promise rejeitada:", e.reason);
   });
 })();
 </script>
-<!-- === /V2 Enhancements === -->
+<!-- === /V2 (iframe submit) === -->
 
 </body>) === -->
 <script>
