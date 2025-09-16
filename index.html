@@ -2822,6 +2822,114 @@ document.querySelectorAll("input, textarea").forEach(el=>{
   }, true);
 })();
 </script>
+<script>
+/**
+ * Gera o PDF da ficha e preenche os campos hidden:
+ *   render_pdf_b64, render_pdf_name, render_pdf_mime
+ * Usa html2pdf.js se disponível; senão, tenta jsPDF + html2canvas.
+ */
+async function ACTEC_generatePdfAndFill(form) {
+  // 1) Garanta os inputs hidden
+  let iB64  = form.querySelector('[name="render_pdf_b64"]');
+  let iName = form.querySelector('[name="render_pdf_name"]');
+  let iMime = form.querySelector('[name="render_pdf_mime"]');
+  if (!iB64)  { iB64  = document.createElement('input'); iB64.type='hidden';  iB64.name='render_pdf_b64';  form.appendChild(iB64); }
+  if (!iName) { iName = document.createElement('input'); iName.type='hidden'; iName.name='render_pdf_name'; form.appendChild(iName); }
+  if (!iMime) { iMime = document.createElement('input'); iMime.type='hidden'; iMime.name='render_pdf_mime'; form.appendChild(iMime); }
+
+  // 2) Defina o nome do arquivo (exibe “Razão Social”/“Fantasia” se existir)
+  const razao    = (form.querySelector('[name="razao_social"]') || {}).value || "";
+  const fantasia = (form.querySelector('[name="nome_fantasia"]') || {}).value || "";
+  const nomeCli  = (razao || fantasia || "Cliente").trim().replace(/[^\w\- ]+/g,'_').substring(0,120);
+  iName.value = `Ficha - ${nomeCli}.pdf`;
+  iMime.value = "application/pdf";
+
+  // 3) Se já temos um base64 válido (ex: reenvio), reutilize
+  const already = (iB64.value||"").replace(/^data:.*?;base64,/, "");
+  if (already && already.length > 1024) return true;
+
+  // 4) Elemento que você quer imprimir como PDF
+  //    Troque o seletor se sua “ficha” estiver em um container específico.
+  const el = document.querySelector("#ficha, .ficha, form") || form;
+
+  // 5) Tentativa A: html2pdf.js
+  if (window.html2pdf) {
+    const opt = {
+      margin:       10,
+      filename:     iName.value,
+      pagebreak:    { mode: ['avoid-all','css','legacy'] },
+      image:        { type: 'jpeg', quality: 0.95 },
+      html2canvas:  { scale: 2, useCORS: true },
+      jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
+    };
+    const worker = window.html2pdf().set(opt).from(el);
+    const dataUri = await worker.outputPdf('datauristring');   // "data:application/pdf;base64,AAAA..."
+    const b64 = (dataUri||"").replace(/^data:.*?;base64,/, "");
+    if (!b64 || b64.length < 1024) throw new Error("PDF vazio (html2pdf)");
+    iB64.value = "data:application/pdf;base64," + b64;
+    return true;
+  }
+
+  // 6) Tentativa B: jsPDF + html2canvas
+  if (window.jspdf && window.html2canvas) {
+    const { jsPDF } = window.jspdf;
+    const canvas = await window.html2canvas(el, { scale: 2, useCORS: true });
+    const imgData = canvas.toDataURL('image/jpeg', 0.95);
+    const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+    const pageW = 210, pageH = 297;
+    const imgW = pageW - 20; // margens
+    const imgH = imgW * (canvas.height / canvas.width);
+    pdf.addImage(imgData, 'JPEG', 10, 10, imgW, Math.min(imgH, pageH - 20));
+    const dataUri = pdf.output('datauristring');
+    const b64 = (dataUri||"").replace(/^data:.*?;base64,/, "");
+    if (!b64 || b64.length < 1024) throw new Error("PDF vazio (jsPDF/html2canvas)");
+    iB64.value = "data:application/pdf;base64," + b64;
+    return true;
+  }
+
+  // 7) Falhou (bibliotecas ausentes)
+  throw new Error("Bibliotecas de PDF ausentes (html2pdf.js ou jsPDF+html2canvas).");
+}
+
+/**
+ * Hooka o submit (fluxo via iframe) para garantir que o PDF exista antes de enviar.
+ * Se falhar a geração, bloqueia o envio e mostra alerta.
+ */
+(function(){
+  const form = document.querySelector("form");
+  if (!form) return;
+
+  let generating = false;
+
+  form.addEventListener("submit", async function(e){
+    // Já existe PDF válido? (o Code.gs também valida; aqui prevenimos a saída inválida)
+    const iB64 = form.querySelector('[name="render_pdf_b64"]');
+    const cur  = (iB64 && iB64.value || "").replace(/^data:.*?;base64,/, "");
+    if (cur && cur.length > 1024) return; // deixa enviar
+
+    e.preventDefault();
+    if (generating) return;
+    generating = true;
+
+    const btn = form.querySelector("[type=submit]");
+    const old = btn ? btn.textContent : null;
+    if (btn) btn.textContent = "Gerando PDF…";
+
+    try {
+      await ACTEC_generatePdfAndFill(form);
+      // Re-dispara o submit nativo (vai para o iframe)
+      if (btn) btn.textContent = "Enviando…";
+      form.submit();
+    } catch (err) {
+      console.error("[PDF] erro ao gerar:", err);
+      alert("Falha ao gerar o PDF da ficha. Verifique se as bibliotecas (html2pdf.js ou jsPDF+html2canvas) estão carregadas e tente novamente.");
+      if (btn && old) btn.textContent = "Tentar novamente";
+    } finally {
+      generating = false;
+    }
+  }, true);
+})();
+</script>
 
 </body>
 </html>
