@@ -2624,11 +2624,13 @@ hideSalvarButtons();
 const observer = new MutationObserver(hideSalvarButtons);
 observer.observe(document.body, { childList: true, subtree: true });
 </script>
-        
+<script> (function(){ function removeSalvar(nodeList){ nodeList.forEach(function(node){ if (!(node instanceof Element)) return; // procura botão com onclick que chame saveForm if (node.matches && node.matches('button[onclick*="saveForm"]')) node.remove(); // remove se texto for "Salvar" if (node.tagName === 'BUTTON' && (node.textContent||'').trim().toLowerCase() === 'salvar') node.remove(); // também verifica descendentes node.querySelectorAll && node.querySelectorAll('button[onclick*="saveForm"]').forEach(function(b){ b.remove(); }); node.querySelectorAll && node.querySelectorAll('button').forEach(function(b){ if ((b.textContent||'').trim().toLowerCase() === 'salvar') b.remove(); }); }); } // Remove já existente removeSalvar([document]); // Observa adições ao DOM var obs = new MutationObserver(function(mutations){ mutations.forEach(function(m){ if (m.addedNodes && m.addedNodes.length) removeSalvar(m.addedNodes); }); }); obs.observe(document.documentElement || document.body, { childList: true, subtree: true }); })(); </script>
+ 
 </body>
 
 
 </html>
+
 
 
 
