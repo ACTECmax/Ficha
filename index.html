@@ -2329,7 +2329,98 @@ function inferFieldsIfMissing(obj){
   }
 })();
 </script>
-<!-- === ACTECmax V2 glue (colar antes de </body>) === -->
+<!-- === ACTECmax V2 glue (colar antes de 
+<!-- === V2 Enhancements: Diagnostics + Safe Submit + Debounce === -->
+<script>
+// === Diagnostics: long tasks & global errors ===
+try {
+  new PerformanceObserver((list)=>{
+    for (const entry of list.getEntries()) {
+      if (entry.duration > 50) {
+        console.warn("[DIAG] Long task:", Math.round(entry.duration), "ms", entry.name||entry.entryType);
+      }
+    }
+  }).observe({entryTypes:["longtask"]});
+} catch(_) {}
+
+window.addEventListener("error", (e)=>{
+  console.error("[DIAG] JS error:", e.message, "em", e.filename+":"+e.lineno+":"+e.colno);
+});
+window.addEventListener("unhandledrejection", (e)=>{
+  console.error("[DIAG] Promise rejeitada:", e.reason);
+});
+</script>
+
+<script>
+// === Safe submit with timeout + duplicate click guard ===
+(function(){
+  const form = document.querySelector("form");
+  if (!form) return;
+
+  let sending = false;
+  const URL_SCRIPT = (window.ACTEC_SCRIPT_URL || "https://script.google.com/macros/s/AKfycbztt_1LIn_DlLRvsAT7ML55VgT-tVvIHgM9dOHyleiO2zEU6vrQ6DcH64F2p0qTZmuy3g/exec");
+
+  async function fetchWithTimeout(resource, options = {}) {
+    const { timeout = 45000 } = options;
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeout);
+    try {
+      const res = await fetch(resource, { ...options, signal: controller.signal });
+      return res;
+    } finally {
+      clearTimeout(id);
+    }
+  }
+
+  form.addEventListener("submit", async (e)=>{
+    // If the form already has an action pointing to Apps Script, keep it.
+    // Our handler just ensures timeout + guard + nice UX.
+    e.preventDefault();
+    if (sending) return;
+    sending = true;
+
+    const btn = form.querySelector("[type=submit]");
+    const originalText = btn ? btn.textContent : null;
+    if (btn) btn.textContent = "Enviando…";
+
+    try {
+      // Ensure any client-side PDF (render_pdf_*) fields are already set by the page logic (if present)
+      const fd = new FormData(form);
+
+      // IMPORTANT: do NOT set Content-Type manually
+      const res = await fetchWithTimeout(URL_SCRIPT, { method: "POST", body: fd, timeout: 45000 });
+
+      if (!res.ok) throw new Error("Falha no envio: " + res.status);
+      alert("Enviado com sucesso!");
+      form.reset();
+    } catch (err) {
+      console.error("[ENVIO] Erro:", err);
+      alert("Não foi possível concluir o envio agora. Tente novamente.");
+    } finally {
+      if (btn && originalText) btn.textContent = originalText;
+      sending = false;
+    }
+  }, { passive: false });
+})();
+</script>
+
+<script>
+// === Debounce for noisy inputs (masks/validations) ===
+(function(){
+  const debounce = (fn, ms=200)=>{
+    let t; 
+    return (...args)=>{ clearTimeout(t); t = setTimeout(()=>fn(...args), ms); };
+  };
+  document.querySelectorAll("input, textarea").forEach(el=>{
+    el.addEventListener("input", debounce(()=> {
+      // place lightweight validations here if needed
+    }, 150));
+  });
+})();
+</script>
+<!-- === /V2 Enhancements === -->
+
+</body>) === -->
 <script>
 (function(){
   // 1) URL do NOVO Apps Script (V2)
