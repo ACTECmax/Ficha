@@ -1,133 +1,172 @@
-<script>
-(function(){"use strict";
-  // SUA URL /exec:
-  var EXEC = "https://script.google.com/macros/s/AKfycbztt_1LIn_DlLRvsAT7ML55VgT-tVvIHgM9dOHyleiO2zEU6vrQ6DcH64F2p0qTZmuy3g/exec";
+// Namespace simples pra evitar globals
+window.ACTECMAX = window.ACTECMAX || {};
 
-  function ready(fn){ if(document.readyState!=="loading") fn(); else document.addEventListener("DOMContentLoaded", fn); }
-  ready(function(){
-    // Pegamos sua form principal (de preferência com id=cadastroForm)
-    var form = document.getElementById('cadastroForm') || document.querySelector('form');
-    if(!form) return;
+(function () {
+  // ======= CONFIG =======
+  const GAS_URL = "https://script.google.com/macros/s/AKfycbztt_1LIn_DlLRvsAT7ML55VgT-tVvIHgM9dOHyleiO2zEU6vrQ6DcH64F2p0qTZmuy3g/exec";
+  const FORM_SELECTOR = "body"; // ou '#form-root' / '#print-area' se tiver um container
+  const PDF_FILENAME_PREFIX = "Ficha_Cadastral_ACTECmax";
 
-    // Garante atributos para o envio nativo
-    form.setAttribute('action', EXEC);
-    form.setAttribute('method','POST');
-    form.setAttribute('enctype','multipart/form-data');
-    form.setAttribute('target','submitFrame');
-    try { form.onsubmit = null; } catch(e){}
-
-    // Iframe oculto para receber a resposta do Google
-    var iframe = document.getElementById('submitFrame');
-    if(!iframe){
-      iframe = document.createElement('iframe');
-      iframe.name = 'submitFrame';
-      iframe.id = 'submitFrame';
-      iframe.style.display = 'none';
-      form.appendChild(iframe);
-    }
-
-    var submitBtn = form.querySelector('button[type=submit],input[type=submit]');
-    var waiting = false;
-    var inflightTimer = null;
-
-    function cleanupUI(showOk){
-      // Reabilita inputs de arquivo desabilitados só durante o envio
-      Array.from(form.querySelectorAll('input[type=file][data-disabled-during-submit="1"]')).forEach(function(inp){
-        inp.disabled=false; inp.removeAttribute('data-disabled-during-submit');
-      });
-      // Restaura o botão
-      if(submitBtn){
-        submitBtn.disabled=false;
-        if(submitBtn.tagName==='BUTTON') submitBtn.textContent = submitBtn.dataset._txt || 'Enviar';
-        else submitBtn.value = submitBtn.dataset._txt || 'Enviar';
+  // Força as regras de impressão (@media print) enquanto capturamos a página
+  function forcePrintStyles() {
+    const style = document.createElement("style");
+    style.id = "force-print-emulation";
+    style.setAttribute("media", "screen");
+    // Esta regra faz todo @media print também valer na tela
+    style.textContent = `
+      @media screen {
+        /* Emular mídia de impressão */
       }
-      try { form.reset(); } catch(e){}
-      if (showOk) alert('Cadastro enviado com sucesso!');
-    }
+    `;
+    document.head.appendChild(style);
 
-    function armTimeout(){
-      clearTimeout(inflightTimer);
-      // Fallback: se o iframe não disparar "load", destrava depois de 8s
-      inflightTimer = setTimeout(function(){
-        if(waiting){ waiting = false; cleanupUI(true); }
-      }, 8000);
-    }
+    // Truque: clona todas as @media print para aplicar em screen
+    try {
+      for (const sheet of document.styleSheets) {
+        // Alguns styles podem ser CORS-protected; ignore erros
+        try {
+          const rules = sheet.cssRules;
+          if (!rules) continue;
+          let cloned = "";
+          for (const rule of rules) {
+            if (rule instanceof CSSMediaRule && /print/i.test(rule.media.mediaText)) {
+              // Transforma @media print { ... } em regras simples válidas na tela
+              for (const r of rule.cssRules) cloned += r.cssText + "\n";
+            }
+          }
+          if (cloned) {
+            const extra = document.createElement("style");
+            extra.className = "cloned-print-rules";
+            extra.textContent = cloned;
+            document.head.appendChild(extra);
+          }
+        } catch (e) {}
+      }
+    } catch (e) {}
 
-    iframe.addEventListener('load', function(){
-      clearTimeout(inflightTimer);
-      if(!waiting) return; // ignora loads que não são a resposta do envio
-      waiting = false;
-      cleanupUI(true);
+    document.documentElement.setAttribute("data-emulate-print", "1");
+  }
+
+  function unforcePrintStyles() {
+    document.documentElement.removeAttribute("data-emulate-print");
+    const s = document.getElementById("force-print-emulation");
+    if (s) s.remove();
+    document.querySelectorAll("style.cloned-print-rules").forEach(el => el.remove());
+  }
+
+  // Converte Blob -> base64
+  function blobToBase64(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(String(reader.result).split(",")[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  // Aguarda fontes e imagens carregarem
+  async function waitForAssets() {
+    if (document.fonts && document.fonts.ready) {
+      try { await document.fonts.ready; } catch (e) {}
+    }
+    // Pequeno delay para layout estabilizar
+    await new Promise(r => setTimeout(r, 150));
+  }
+
+  async function buildPdfBlob() {
+    // Elemento que representa a "página" (use o container do formulário)
+    const el = document.querySelector(FORM_SELECTOR) || document.body;
+
+    // Parâmetros ajustados para A4, respeitando seu CSS de impressão
+    const opt = {
+      margin:       [10, 10, 10, 10], // mm
+      filename:     "temp.pdf",
+      image:        { type: "jpeg", quality: 0.98 },
+      html2canvas:  { scale: 2, useCORS: true, logging: false, windowWidth: document.documentElement.scrollWidth },
+      jsPDF:        { unit: "mm", format: "a4", orientation: "portrait" },
+      pagebreak:    { mode: ["css", "legacy"] } // respeita page-break-* do seu CSS
+    };
+
+    // Usa o pipeline do html2pdf, mas intercepta o Blob antes do save()
+    const worker = html2pdf().set(opt).from(el);
+    const pdfBlob = await new Promise(async (resolve, reject) => {
+      try {
+        const canvas = await worker.toCanvas();
+        const img = await worker.toImg(); // força raster final
+        const pdf = await worker.toPdf();
+        // html2pdf expõe o objeto jsPDF interno:
+        const out = pdf.output("blob");
+        resolve(out);
+      } catch (e) {
+        reject(e);
+      }
     });
 
-    iframe.addEventListener('error', function(){
-      clearTimeout(inflightTimer);
-      if(!waiting) return;
-      waiting = false;
-      cleanupUI(true); // mesmo com erro visual, o servidor já recebeu
+    return pdfBlob;
+  }
+
+  async function postToGAS({ pdfBase64, filename, meta }) {
+    // O seu GAS estava reclamando de "PDF vazio/inválido (render_pdf_b64)".
+    // Enviaremos com o campo exatamente "render_pdf_b64".
+    const payload = {
+      render_pdf_b64: pdfBase64,
+      filename,
+      meta // pode conter dados do cliente (nome, email, etc.)
+    };
+
+    const resp = await fetch(GAS_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
     });
 
-    // Intercepta o submit mas NÃO mexe nas lógicas visuais do seu formulário
-    form.addEventListener('submit', function(ev){
-      ev.preventDefault(); ev.stopPropagation(); ev.stopImmediatePropagation();
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error("Falha no Apps Script: " + text);
+    }
+    return await resp.json().catch(() => ({}));
+  }
 
-      var files = Array.from(form.querySelectorAll('input[type=file]'));
+  ACTECMAX.generatePdfAndSend = async function () {
+    try {
+      // 1) Valide campos obrigatórios aqui (se já tiver, reutilize)
+      // validateFormOrThrow();
 
-      waiting = true;
-      if(submitBtn){
-        submitBtn.dataset._txt = (submitBtn.tagName==='BUTTON' ? submitBtn.textContent : submitBtn.value);
-        submitBtn.disabled = true;
-        if(submitBtn.tagName==='BUTTON') submitBtn.textContent = 'Enviando…';
-        else submitBtn.value = 'Enviando…';
+      // 2) Aplique visual de impressão
+      forcePrintStyles();
+      await waitForAssets();
+
+      // 3) Gere o PDF exatamente como o “Imprimir”
+      const blob = await buildPdfBlob();
+
+      // 4) Converta p/ base64 e envie
+      const base64 = await blobToBase64(blob);
+      if (!base64 || base64.length < 50) {
+        throw new Error("PDF base64 vazio ou muito pequeno.");
       }
 
-      // Sem anexos? envia direto
-      if(!files.length){
-        armTimeout();
-        HTMLFormElement.prototype.submit.call(form);
-        return;
-      }
+      // Monte um nome de arquivo com data e talvez o nome do cliente (se houver campo #cliente_nome)
+      const cliente = (document.querySelector("#cliente_nome")?.value || "Cliente").trim().replace(/[^\w\-]+/g, "_");
+      const filename = `${PDF_FILENAME_PREFIX}_${cliente}_${new Date().toISOString().slice(0,10)}.pdf`;
 
-      // Com anexos: converte todos para base64 e envia
-      var promises = [], hidden = [];
-      files.forEach(function(inp){
-        var base = inp.name || ('file_' + Math.random().toString(36).slice(2));
-        Array.from(inp.files||[]).forEach(function(f, idx){
-          promises.push(new Promise(function(res, rej){
-            var fr = new FileReader();
-            fr.onload = function(){
-              var dataUrl = fr.result || '';
-              var b64 = String(dataUrl).split(',')[1] || '';
-              var suf = inp.multiple ? '_' + (idx+1) : '';
-              var h1 = document.createElement('input'); h1.type='hidden'; h1.name=base+suf+'_name'; h1.value=f.name;
-              var h2 = document.createElement('input'); h2.type='hidden'; h2.name=base+suf+'_mime'; h2.value=f.type || 'application/octet-stream';
-              var h3 = document.createElement('input'); h3.type='hidden'; h3.name=base+suf+'_b64';  h3.value=b64;
-              hidden.push(h1, h2, h3);
-              res();
-            };
-            fr.onerror = rej;
-            fr.readAsDataURL(f);
-          }));
-        });
-      });
+      const meta = {
+        createdAt: new Date().toISOString(),
+        origin: "GitHubPages/Ficha",
+        // Adicione aqui IDs/valores úteis do formulário:
+        // emailAdmin: document.querySelector("#email_admin")?.value || "",
+      };
 
-      Promise.all(promises).then(function(){
-        hidden.forEach(function(h){ form.appendChild(h); });
-        // Desabilita os file-inputs apenas durante o envio para não duplicar multipart
-        files.forEach(function(inp){ inp.disabled = true; inp.setAttribute('data-disabled-during-submit','1'); });
-        armTimeout();
-        HTMLFormElement.prototype.submit.call(form);
-      }).catch(function(err){
-        waiting = false;
-        if(submitBtn){
-          submitBtn.disabled=false;
-          if(submitBtn.tagName==='BUTTON') submitBtn.textContent = submitBtn.dataset._txt || 'Enviar';
-          else submitBtn.value = submitBtn.dataset._txt || 'Enviar';
-        }
-        console && console.error && console.error('Base64 error', err);
-        alert('Falha ao preparar anexos. Tente novamente.');
-      });
-    });
-  });
+      const result = await postToGAS({ pdfBase64: base64, filename, meta });
+
+      alert("PDF gerado e enviado com sucesso!");
+      console.log("GAS result:", result);
+    } catch (err) {
+      console.error(err);
+      alert("Falha ao gerar/enviar o PDF: " + (err?.message || err));
+    } finally {
+      // 5) Remova a emulação do print
+      unforcePrintStyles();
+    }
+  };
 })();
-</script>
+
