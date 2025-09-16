@@ -2504,6 +2504,140 @@ function inferFieldsIfMissing(obj){
 })();
 </script>
 <!-- === /ACTECmax V2 glue === -->
+<!-- === ACTECmax V2 (envio via iframe, sem fetch/CORS) === -->
+<script>
+(function(){
+  // 1) SUA URL do Apps Script V2
+  const APPS_SCRIPT_URL_V2 = "https://script.google.com/macros/s/AKfycbztt_1LIn_DlLRvsAT7ML55VgT-tVvIHgM9dOHyleiO2zEU6vrQ6DcH64F2p0qTZmuy3g/exec";
+
+  // 2) Pega o form principal
+  const form = document.getElementById('cadastroForm') || document.querySelector('form');
+  if(!form) return;
+
+  // 3) Garante action + target em iframe oculto
+  form.setAttribute('action', APPS_SCRIPT_URL_V2);
+  let sink = document.querySelector('iframe[name="sinkFrame"]');
+  if (!sink){
+    sink = document.createElement('iframe');
+    sink.name = 'sinkFrame';
+    sink.style.display = 'none';
+    document.body.appendChild(sink);
+  }
+  form.setAttribute('target', 'sinkFrame');
+
+  // 4) Esconde/remover “Salvar”
+  (function hideSalvar(){
+    document.querySelectorAll('button[onclick*="save"], .btn-save, [id*="salvar" i], [class*="salvar" i], [title*="salvar" i], [aria-label*="salvar" i]')
+      .forEach(el => { if (el.type !== 'submit') el.style.display = 'none'; });
+  })();
+
+  // 5) Overlay “não atualize”
+  if (!document.getElementById('actec-overlay')){
+    const css = document.createElement('style');
+    css.textContent = `
+      #actec-overlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(15,23,42,.6);z-index:99999}
+      #actec-box{background:#fff;border-radius:14px;padding:18px 20px;max-width:420px;text-align:center;box-shadow:0 18px 48px rgba(0,0,0,.3);font-family:Segoe UI,Arial,sans-serif}
+      #actec-title{font-weight:700;color:#0b2d5e;margin-bottom:6px}
+      #actec-msg{color:#334155;margin-bottom:12px}
+      .actec-spin{width:28px;height:28px;border:3px solid #e2e8f0;border-top-color:#0b2d5e;border-radius:50%;margin:0 auto 8px;animation:actecspin 1s linear infinite}
+      @keyframes actecspin{to{transform:rotate(360deg)}}
+    `;
+    document.head.appendChild(css);
+    const ov = document.createElement('div');
+    ov.id = 'actec-overlay';
+    ov.innerHTML = `<div id="actec-box"><div class="actec-spin"></div><div id="actec-title">Enviando sua ficha…</div><div id="actec-msg">Por favor, não feche nem atualize esta página.</div></div>`;
+    document.body.appendChild(ov);
+  }
+  function overlay(show){ document.getElementById('actec-overlay').style.display = show ? 'flex' : 'none'; }
+
+  // 6) Campos ocultos para o PDF renderizado
+  function ensureHidden(name, val){
+    let el = form.querySelector(`input[name="${name}"]`);
+    if(!el){ el = document.createElement('input'); el.type='hidden'; el.name=name; form.appendChild(el); }
+    if (val!=null) el.value = val;
+    return el;
+  }
+  const hB64  = ensureHidden('render_pdf_b64','');
+  const hName = ensureHidden('render_pdf_name','');
+  const hMime = ensureHidden('render_pdf_mime','application/pdf');
+  const hWhen = ensureHidden('_submitted_at','');
+
+  // 7) Carrega html2pdf se não existir
+  function loadHtml2Pdf(){
+    return new Promise((res,rej)=>{
+      if (window.html2pdf) return res();
+      const s = document.createElement('script');
+      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+      s.onload = ()=>res();
+      s.onerror = ()=>rej(new Error('Falha ao carregar html2pdf'));
+      document.head.appendChild(s);
+    });
+  }
+
+  // 8) Gera PDF (igual ao que está na tela). Preferimos #print-root se existir; senão, o próprio form.
+  async function makePdfB64(){
+    await loadHtml2pdf();
+    const area = document.getElementById('print-root') || form;
+    const opt = {
+      margin:[10,10,10,10],
+      filename:'Ficha-temp.pdf',
+      image:{type:'jpeg', quality:0.98},
+      html2canvas:{scale:2, useCORS:true},
+      jsPDF:{unit:'mm', format:'a4', orientation:'portrait'}
+    };
+    const worker = html2pdf().from(area).set(opt);
+    const blob = await worker.outputPdf('blob');
+    const b64 = await new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => resolve(String(fr.result).split(',')[1]);
+      fr.onerror = reject;
+      fr.readAsDataURL(blob);
+    });
+    const razao = (form.querySelector('[name="razao_social"]')?.value || '').trim();
+    const fantasia = (form.querySelector('[name="nome_fantasia"]')?.value || '').trim();
+    const now = new Date(), pad = n=>String(n).padStart(2,'0');
+    const stamp = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+    const nomeBase = fantasia || razao || 'Empresa';
+    hB64.value  = b64;
+    hName.value = `Ficha - ${nomeBase} - ${stamp}.pdf`;
+    hMime.value = 'application/pdf';
+  }
+
+  // 9) Botão enviar: estados
+  const btnSend = form.querySelector('button[type="submit"], input[type="submit"]');
+  function setBtn(state){
+    if(!btnSend) return;
+    if(state==='idle'){btnSend.disabled=false; btnSend.textContent='Enviar';}
+    if(state==='sending'){btnSend.disabled=true; btnSend.textContent='Enviando…';}
+    if(state==='done'){btnSend.disabled=true; btnSend.textContent='Enviado ✓';}
+    if(state==='error'){btnSend.disabled=false; btnSend.textContent='Tentar novamente';}
+  }
+
+  // 10) Ouve retorno do Apps Script (postMessage)
+  window.addEventListener('message', function(e){
+    const msg = String(e.data||'');
+    if (msg === 'ACTECV2_OK'){ overlay(false); setBtn('done'); /* opcional: mostrar CTA de voltar */ }
+    if (msg === 'ACTECV2_ERR'){ overlay(false); setBtn('error'); alert('Houve um erro ao enviar. Tente novamente.'); }
+  });
+
+  // 11) Submissão via iframe (sem CORS)
+  form.addEventListener('submit', async function(ev){
+    ev.preventDefault();
+    try{
+      setBtn('sending'); overlay(true);
+      hWhen.value = new Date().toISOString();
+      await makePdfB64();     // gera e injeta render_pdf_b64 / name / mime
+      form.submit();          // envia pro Apps Script via iframe (sinkFrame)
+      // O Apps Script responde com postMessage('ACTECV2_OK'), que tratamos no listener acima.
+    }catch(err){
+      console.error(err);
+      overlay(false); setBtn('error');
+      alert('Não foi possível concluir o envio agora. Verifique sua conexão e tente novamente.');
+    }
+  }, {capture:true});
+})();
+</script>
+<!-- === /ACTECmax V2 === -->
 
 </body>
 </html>
