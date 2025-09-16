@@ -2613,10 +2613,29 @@ document.querySelectorAll('button, input, a').forEach(function(el) {
   }
 });
 </script>
+<script>
+function hideSalvarButtons() {
+  document.querySelectorAll('button, input, a').forEach(function(el) {
+    var txt = (el.textContent || el.value || '').trim().toLowerCase();
+    if (txt.normalize("NFD").replace(/[\u0300-\u036f]/g, "") === 'salvar') {
+      el.style.display = 'none';
+      el.setAttribute('aria-hidden', 'true');
+    }
+  });
+}
+
+// Roda uma vez ao carregar
+hideSalvarButtons();
+
+// Observa mudanças no DOM
+const observer = new MutationObserver(hideSalvarButtons);
+observer.observe(document.body, { childList: true, subtree: true });
+</script>
         
 </body>
 
 
 </html>
+
 
 
