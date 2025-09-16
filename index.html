@@ -2591,7 +2591,20 @@ function inferFieldsIfMissing(obj){
   try { new MutationObserver(hideSalvar).observe(document.body,{childList:true,subtree:true}); } catch(_){}
 })();
 </script>
+<!-- html2pdf (usa html2canvas + jsPDF) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-YcsIPbZ2P9x9wX5nWQ0xk6m3H7cRz+0oOKkNq8ycV0wHkNf1b3b7fU2DqQ2eB2a1Xr3ep8Cq9EwZbTz0vCqj4g==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+
+<!-- Seu JS principal -->
+<script src="./actecmax_submit_patch.js"></script>
+
+<!-- Botão para gerar e enviar o PDF -->
+<div style="margin: 24px 0;">
+  <button type="button" onclick="ACTECMAX.generatePdfAndSend()">
+    Gerar PDF e Enviar
+  </button>
+</div>
 
 </body>
+
 
 </html>
