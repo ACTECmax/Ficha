@@ -2638,6 +2638,70 @@ function inferFieldsIfMissing(obj){
 })();
 </script>
 <!-- === /ACTECmax V2 === -->
+<script>
+(function(){
+  const form = document.querySelector("form");
+  if (!form) return;
+
+  let sending = false;
+
+  async function fetchWithTimeout(resource, options = {}) {
+    const { timeout = 30000 } = options;
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeout);
+    try {
+      const res = await fetch(resource, { ...options, signal: controller.signal });
+      return res;
+    } finally {
+      clearTimeout(id);
+    }
+  }
+
+  form.addEventListener("submit", async (e)=>{
+    e.preventDefault();
+    if (sending) return; // evita travar por cliques múltiplos
+    sending = true;
+
+    const btn = form.querySelector("[type=submit]");
+    const originalText = btn ? btn.textContent : null;
+    if (btn) btn.textContent = "Enviando…";
+
+    try {
+      const data = new FormData(form);
+      // ⚠️ TROQUE pela sua URL do Apps Script (V2)
+      const URL_SCRIPT = "https://script.google.com/macros/s/SEU_ID/exec";
+
+      const res = await fetchWithTimeout(URL_SCRIPT, {
+        method: "POST",
+        body: data,
+        timeout: 45000,
+      });
+
+      if (!res.ok) throw new Error("Falha no envio: " + res.status);
+      // Mostre confirmação leve (sem alterar layout)
+      alert("Enviado com sucesso!");
+      form.reset();
+    } catch (err) {
+      console.error("[ENVIO] Erro:", err);
+      alert("Não foi possível concluir o envio agora. Tente novamente.");
+    } finally {
+      if (btn && originalText) btn.textContent = originalText;
+      sending = false;
+    }
+  }, { passive: false });
+})();
+</script>
+<script>
+const debounce = (fn, ms=200)=>{
+  let t; 
+  return (...args)=>{ clearTimeout(t); t = setTimeout(()=>fn(...args), ms); };
+};
+document.querySelectorAll("input, textarea").forEach(el=>{
+  el.addEventListener("input", debounce(()=> {
+    // Coloque aqui validações leves, se tiver
+  }, 150));
+});
+</script>
 
 </body>
 </html>
