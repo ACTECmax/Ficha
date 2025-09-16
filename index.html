@@ -2597,14 +2597,6 @@ function inferFieldsIfMissing(obj){
 <!-- Seu JS principal -->
 <script src="./actecmax_submit_patch.js"></script>
 
-<!-- Botão para gerar e enviar o PDF -->
-<div style="margin: 24px 0;">
-  <button type="button" onclick="ACTECMAX.generatePdfAndSend()">
-    Gerar PDF e Enviar
-  </button>
-</div>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-
 <script>
 document.querySelectorAll('button, input, a').forEach(function(el) {
   if ((el.textContent || el.value || '').trim().toLowerCase() === 'salvar') {
@@ -2636,6 +2628,7 @@ observer.observe(document.body, { childList: true, subtree: true });
 
 
 </html>
+
 
 
 
